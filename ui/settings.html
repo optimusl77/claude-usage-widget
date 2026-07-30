@@ -1,41 +1,48 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Claude Usage – Einstellungen</title>
+    <title>Claude Usage Settings</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="settings-body">
-      <div class="settings-title">Einstellungen</div>
+      <div class="settings-title">Settings</div>
 
       <div class="field-group">
-        <div class="field-label">Design</div>
+        <div class="field-label">Theme</div>
         <div class="segmented" id="theme-segmented">
           <button data-value="system">System</button>
-          <button data-value="light">Hell</button>
-          <button data-value="dark">Dunkel</button>
+          <button data-value="light">Light</button>
+          <button data-value="dark">Dark</button>
         </div>
       </div>
 
       <div class="field-group">
-        <div class="field-label">Akzentfarbe</div>
+        <div class="field-label">Accent color</div>
         <div class="color-swatches" id="accent-swatches"></div>
       </div>
 
       <div class="field-group">
-        <div class="toggle-row">
-          <span class="field-label">Kompakte Ansicht</span>
-          <label class="switch">
-            <input type="checkbox" id="compact-toggle" />
-            <span class="slider"></span>
-          </label>
-        </div>
+        <div class="field-label">Bar color</div>
+        <div class="color-swatches" id="bar-color-swatches"></div>
+        <div class="field-hint">"Automatic" colors each bar by how full it is; a fixed color uses the same shade for every bar.</div>
       </div>
 
       <div class="field-group">
         <div class="toggle-row">
-          <span class="field-label">Immer im Vordergrund</span>
+          <span class="field-label">Estimated time to limit</span>
+          <label class="switch">
+            <input type="checkbox" id="estimated-time-toggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="field-hint">Estimates when a bar will hit 100%, based on how fast your usage has been rising. Needs a bit of history to become accurate.</div>
+      </div>
+
+      <div class="field-group">
+        <div class="toggle-row">
+          <span class="field-label">Always on top</span>
           <label class="switch">
             <input type="checkbox" id="always-on-top-toggle" />
             <span class="slider"></span>
@@ -45,7 +52,7 @@
 
       <div class="field-group">
         <div class="toggle-row">
-          <span class="field-label">Beim Windows-Start starten</span>
+          <span class="field-label">Start with Windows</span>
           <label class="switch">
             <input type="checkbox" id="autostart-toggle" />
             <span class="slider"></span>
@@ -54,23 +61,28 @@
       </div>
 
       <div class="field-group">
-        <div class="field-label">Transparenz</div>
+        <div class="field-label">Opacity</div>
         <input type="range" id="opacity-slider" min="0.5" max="1" step="0.02" />
       </div>
 
       <div class="field-group">
-        <div class="field-label">Aktualisierungsintervall</div>
+        <div class="field-label">Widget size</div>
+        <input type="range" id="widget-scale-slider" min="0.8" max="1.6" step="0.05" />
+      </div>
+
+      <div class="field-group">
+        <div class="field-label">Refresh interval</div>
         <div class="segmented" id="interval-segmented">
-          <button data-value="180">3 Min</button>
-          <button data-value="300">5 Min</button>
-          <button data-value="600">10 Min</button>
-          <button data-value="1800">30 Min</button>
+          <button data-value="180">3 min</button>
+          <button data-value="300">5 min</button>
+          <button data-value="600">10 min</button>
+          <button data-value="1800">30 min</button>
         </div>
-        <div class="field-hint">Jede Aktualisierung kostet minimal von deinem Claude-Kontingent (ein sehr kurzer Testaufruf) – kürzere Intervalle verbrauchen mehr davon.</div>
+        <div class="field-hint">Each refresh uses a tiny sliver of your Claude quota (a very short test request); shorter intervals use more of it.</div>
       </div>
 
       <div class="settings-footer">
-        Nutzt eine inoffizielle, nicht von Anthropic unterstützte Methode, um die Abo-Auslastung auszulesen (Login läuft über die offizielle Claude Code CLI). Kann bei API-Änderungen zeitweise nicht funktionieren.
+        Uses an unofficial method not supported by Anthropic to read your subscription usage (login goes through the official Claude Code CLI). May stop working temporarily if the API changes.
       </div>
     </div>
 

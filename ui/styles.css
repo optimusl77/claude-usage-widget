@@ -81,11 +81,6 @@ button {
   overflow: hidden;
 }
 
-.card.compact {
-  padding: 10px 12px 9px;
-  gap: 6px;
-}
-
 .titlebar {
   display: flex;
   align-items: center;
@@ -146,13 +141,9 @@ button {
 .meters {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   flex: 1;
   justify-content: center;
-}
-
-.compact .meters {
-  gap: 6px;
 }
 
 .meter-row .meter-head {
@@ -204,19 +195,22 @@ button {
   background: var(--status-critical);
 }
 
-.reset-line {
-  font-size: 11px;
+.meter-row .meter-sub {
+  margin-top: 4px;
+  font-size: 10.5px;
   color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  gap: 5px;
 }
 
-.reset-line .status-icon {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex: none;
+.meter-row .meter-estimate {
+  margin-top: 1px;
+  font-size: 10.5px;
+  color: var(--status-warning);
+}
+
+.stale-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
 }
 
 /* ---------- States: login / expired / error / loading ---------- */
@@ -400,6 +394,16 @@ input[type="range"] {
 
 .swatch.active {
   border-color: var(--text-primary);
+}
+
+.swatch-auto {
+  background: conic-gradient(
+    var(--status-good),
+    var(--status-warning),
+    var(--status-serious),
+    var(--status-critical),
+    var(--status-good)
+  );
 }
 
 .settings-footer {

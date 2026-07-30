@@ -6,10 +6,11 @@ const content = document.getElementById("content");
 const card = document.getElementById("card");
 let countdownTimer = null;
 let currentSettings = null;
+let lastStatus = null;
 
 function applyWidgetTheme(settings) {
   applyTheme(settings);
-  card.classList.toggle("compact", settings.compactLayout);
+  document.documentElement.style.zoom = settings.widgetScale || 1;
   document.body.style.opacity = String(settings.opacity ?? 1);
 }
 
@@ -22,7 +23,7 @@ function statusForUtilization(u) {
 }
 
 function formatDuration(seconds) {
-  if (seconds <= 0) return "gleich";
+  if (seconds <= 0) return "now";
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   if (h > 0) return `${h}h ${m}m`;
@@ -31,11 +32,17 @@ function formatDuration(seconds) {
   return `${s}s`;
 }
 
+function formatRelative(targetUnix) {
+  const now = Math.floor(Date.now() / 1000);
+  const remaining = targetUnix - now;
+  return formatDuration(Math.max(0, remaining));
+}
+
 function renderLoading() {
   content.innerHTML = `
     <div class="state-view">
       <div class="spinner"></div>
-      <div class="state-desc">Lade Nutzungsdaten…</div>
+      <div class="state-desc">Loading usage data…</div>
     </div>`;
 }
 
@@ -43,17 +50,17 @@ function renderWaitingForLogin() {
   content.innerHTML = `
     <div class="state-view">
       <div class="spinner"></div>
-      <div class="state-title">Warte auf Login im Browser</div>
-      <div class="state-desc">Schließe den Login im geöffneten Browserfenster ab. Das kann einen Moment dauern.</div>
-      <button class="primary-btn" id="check-again-btn">Ich bin fertig</button>
+      <div class="state-title">Waiting for login in your browser</div>
+      <div class="state-desc">Complete the login in the browser window that opened. This can take a moment.</div>
+      <button class="primary-btn" id="check-again-btn">I'm done</button>
     </div>`;
   document.getElementById("check-again-btn").addEventListener("click", pollUntilLoggedIn);
 }
 
-/// Pollt get_usage_status im Hintergrund, bis die Session nicht mehr
-/// "notLoggedIn" ist. Der Rust-Befehl start_claude_login wartet bewusst nicht
-/// auf das Prozessende (siehe lib.rs) - dieses Polling ist der eigentliche
-/// Fortschrittsindikator fuer den Login.
+// Polls get_usage_status in the background until the session is no longer
+// "notLoggedIn". The start_claude_login Rust command deliberately doesn't
+// wait for the process to exit (see lib.rs); this polling is the actual
+// login progress indicator.
 let loginPollToken = 0;
 async function pollUntilLoggedIn() {
   const myToken = ++loginPollToken;
@@ -76,16 +83,16 @@ async function pollUntilLoggedIn() {
     }
     await new Promise((r) => setTimeout(r, 3000));
   }
-  dbg("pollUntilLoggedIn: gave up after 60 attempts (~3 minutes)");
+  dbg("pollUntilLoggedIn: gave up after 60 attempts (about 3 minutes)");
   renderNotLoggedIn();
 }
 
 function renderNotLoggedIn() {
   content.innerHTML = `
     <div class="state-view">
-      <div class="state-title">Nicht angemeldet</div>
-      <div class="state-desc">Melde dich mit deinem Claude-Konto an, um deine Nutzung zu sehen.</div>
-      <button class="primary-btn" id="login-btn">Mit Claude anmelden</button>
+      <div class="state-title">Not signed in</div>
+      <div class="state-desc">Sign in with your Claude account to see your usage.</div>
+      <button class="primary-btn" id="login-btn">Sign in with Claude</button>
     </div>`;
   document.getElementById("login-btn").addEventListener("click", async (e) => {
     dbg("login button clicked (state: notLoggedIn)");
@@ -105,9 +112,9 @@ function renderNotLoggedIn() {
 function renderSessionExpired() {
   content.innerHTML = `
     <div class="state-view">
-      <div class="state-title">Sitzung abgelaufen</div>
-      <div class="state-desc">Öffne kurz Claude Code, damit sich die Sitzung erneuert, oder melde dich neu an.</div>
-      <button class="primary-btn" id="login-btn">Erneut anmelden</button>
+      <div class="state-title">Session expired</div>
+      <div class="state-desc">Open Claude Code briefly to refresh the session, or sign in again.</div>
+      <button class="primary-btn" id="login-btn">Sign in again</button>
     </div>`;
   document.getElementById("login-btn").addEventListener("click", async (e) => {
     dbg("login button clicked (state: sessionExpired)");
@@ -126,12 +133,12 @@ function renderSessionExpired() {
 
 function renderError(message, staleSnapshot) {
   if (staleSnapshot) {
-    renderSnapshot(staleSnapshot, null, true);
+    renderSnapshot(staleSnapshot, true);
     return;
   }
   content.innerHTML = `
     <div class="state-view">
-      <div class="state-title">Konnte nicht aktualisieren</div>
+      <div class="state-title">Couldn't refresh</div>
       <div class="state-desc">${escapeHtml(message)}</div>
     </div>`;
 }
@@ -142,10 +149,20 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-function meterRow(label, window_) {
+function meterRow(label, window_, barColorOverride, showEstimate) {
   const util = window_?.utilization ?? 0;
   const pct = Math.round(util * 1000) / 10;
   const status = statusForUtilization(util);
+  const colorStyle = barColorOverride ? ` background-color:${barColorOverride};` : "";
+
+  const resetLine = window_?.resetUnix
+    ? `<div class="meter-sub" data-target-unix="${window_.resetUnix}" data-prefix="Resets in "></div>`
+    : "";
+  const estimateLine =
+    showEstimate && window_?.estimatedFullUnix
+      ? `<div class="meter-estimate" data-target-unix="${window_.estimatedFullUnix}" data-prefix="~Full in "></div>`
+      : "";
+
   return `
     <div class="meter-row">
       <div class="meter-head">
@@ -153,42 +170,40 @@ function meterRow(label, window_) {
         <span class="meter-value">${pct}%</span>
       </div>
       <div class="meter-track">
-        <div class="meter-fill" data-status="${status}" style="width:${Math.min(100, Math.max(0, pct))}%"></div>
+        <div class="meter-fill" data-status="${status}" style="width:${Math.min(100, Math.max(0, pct))}%;${colorStyle}"></div>
       </div>
+      ${resetLine}
+      ${estimateLine}
     </div>`;
 }
 
-function renderSnapshot(snapshot, subscriptionType, stale) {
+function renderSnapshot(snapshot, stale) {
   if (countdownTimer) clearInterval(countdownTimer);
+
+  const barColor = currentSettings?.barColor || null;
+  const showEstimate = !!currentSettings?.showEstimatedTime;
 
   content.innerHTML = `
     <div class="meters">
-      ${meterRow("Session (5h)", snapshot.fiveHour)}
-      ${meterRow("Woche (7 Tage)", snapshot.sevenDay)}
+      ${meterRow("Session (5h)", snapshot.fiveHour, barColor, showEstimate)}
+      ${meterRow("Week (7 days)", snapshot.sevenDay, barColor, showEstimate)}
     </div>
-    <div class="reset-line" id="reset-line"></div>
+    ${stale ? '<div class="stale-note">Showing last known values, update failed</div>' : ""}
   `;
 
-  const bindingWindow =
-    snapshot.representativeClaim === "seven_day" ? snapshot.sevenDay : snapshot.fiveHour;
-  const resetLine = document.getElementById("reset-line");
-
   function tick() {
-    if (!bindingWindow?.resetUnix) {
-      resetLine.textContent = stale ? "Letzte bekannte Werte (Aktualisierung fehlgeschlagen)" : "";
-      return;
-    }
-    const now = Math.floor(Date.now() / 1000);
-    const remaining = bindingWindow.resetUnix - now;
-    const prefix = stale ? "Letzte bekannte Werte · " : "";
-    resetLine.textContent = `${prefix}Reset in ${formatDuration(Math.max(0, remaining))}`;
+    document.querySelectorAll("[data-target-unix]").forEach((el) => {
+      const target = Number(el.dataset.targetUnix);
+      const prefix = el.dataset.prefix || "";
+      el.textContent = `${prefix}${formatRelative(target)}`;
+    });
   }
-
   tick();
   countdownTimer = setInterval(tick, 1000);
 }
 
 function applyStatus(status) {
+  lastStatus = status;
   switch (status.kind) {
     case "notLoggedIn":
       renderNotLoggedIn();
@@ -197,7 +212,7 @@ function applyStatus(status) {
       renderSessionExpired();
       break;
     case "ok":
-      renderSnapshot(status.snapshot, status.subscriptionType, false);
+      renderSnapshot(status.snapshot, false);
       break;
     case "error":
       renderError(status.message, status.staleSnapshot);
@@ -208,7 +223,7 @@ function applyStatus(status) {
 }
 
 async function refresh() {
-  loginPollToken++; // ein manueller/periodischer Refresh bricht ein laufendes Login-Polling ab
+  loginPollToken++; // a manual/periodic refresh cancels any running login poll
   dbg("refresh: calling get_usage_status");
   try {
     const status = await invoke("get_usage_status");
@@ -249,6 +264,9 @@ async function init() {
   await listen("settings:changed", async () => {
     currentSettings = await invoke("get_settings");
     applyWidgetTheme(currentSettings);
+    // Re-render the last known status with the new settings (bar color,
+    // estimated time toggle) without triggering another network poll.
+    if (lastStatus) applyStatus(lastStatus);
   });
 }
 

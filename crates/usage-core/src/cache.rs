@@ -1,22 +1,26 @@
-use crate::usage::UsageSnapshot;
+use crate::usage::{RateWindow, UsageSnapshot};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
-    #[error("Konnte App-Datenverzeichnis nicht bestimmen")]
+    #[error("could not determine the app data directory")]
     NoAppDir,
-    #[error("Dateizugriff fehlgeschlagen: {0}")]
+    #[error("file access failed: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Ungueltiges JSON: {0}")]
+    #[error("invalid JSON: {0}")]
     Parse(#[from] serde_json::Error),
 }
 
-/// Verzeichnis fuer Settings/Cache-Dateien der App (z.B. Windows:
+/// Directory for the app's settings/cache files (e.g. Windows:
 /// %APPDATA%\claude-usage-widget, Linux: ~/.config/claude-usage-widget).
 pub fn app_data_dir() -> Result<PathBuf, StoreError> {
     let base = dirs::config_dir().ok_or(StoreError::NoAppDir)?;
     Ok(base.join("claude-usage-widget"))
+}
+
+fn default_widget_scale() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -24,13 +28,26 @@ pub fn app_data_dir() -> Result<PathBuf, StoreError> {
 pub struct Settings {
     pub theme: Theme,
     pub accent_color: String,
-    pub compact_layout: bool,
+    /// Show an extrapolated "full at" estimate under each bar, based on
+    /// recent usage history. Off by default since it needs some history to
+    /// become meaningful.
+    #[serde(default)]
+    pub show_estimated_time: bool,
     pub always_on_top: bool,
     pub opacity: f32,
     pub poll_interval_secs: u64,
     pub window_x: Option<i32>,
     pub window_y: Option<i32>,
     pub autostart: bool,
+    /// Fixed color used for all usage bars, overriding the automatic
+    /// good/warning/serious/critical severity coloring. `None` means
+    /// automatic.
+    #[serde(default)]
+    pub bar_color: Option<String>,
+    /// Scales the widget window size (and its content) relative to the
+    /// base size. 1.0 is the default size.
+    #[serde(default = "default_widget_scale")]
+    pub widget_scale: f32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -46,22 +63,61 @@ impl Default for Settings {
         Self {
             theme: Theme::System,
             accent_color: "#d97757".to_string(),
-            compact_layout: false,
+            show_estimated_time: false,
             always_on_top: true,
             opacity: 0.96,
-            // Jeder Poll kostet minimal Kontingent (siehe usage.rs) - 5 Minuten
-            // ist ein vernuenftiger Default zwischen Aktualitaet und Verbrauch.
+            // Every poll costs a small sliver of quota (see usage.rs) - 5
+            // minutes is a reasonable default between freshness and cost.
             poll_interval_secs: 300,
             window_x: None,
             window_y: None,
             autostart: false,
+            bar_color: None,
+            widget_scale: 1.0,
         }
     }
 }
 
+/// How many past snapshots to keep for the "estimated time to full" feature.
+/// At the default 5-minute poll interval this covers close to 7 days, which
+/// matches the longest rate-limit window we track.
+const MAX_HISTORY: usize = 2000;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct UsageCache {
     pub last_snapshot: Option<UsageSnapshot>,
+    #[serde(default)]
+    pub history: Vec<UsageSnapshot>,
+}
+
+impl UsageCache {
+    /// Records a freshly fetched snapshot as both the latest snapshot and a
+    /// new history point, pruning the oldest entries beyond `MAX_HISTORY`.
+    pub fn record(&mut self, snapshot: UsageSnapshot) {
+        self.last_snapshot = Some(snapshot.clone());
+        self.history.push(snapshot);
+        if self.history.len() > MAX_HISTORY {
+            let excess = self.history.len() - MAX_HISTORY;
+            self.history.drain(0..excess);
+        }
+    }
+
+    /// Extracts `(timestamp, utilization, reset_unix)` triples for a single
+    /// rate-limit window across history, for feeding into
+    /// `estimate::estimate_full_at`. Points missing utilization or
+    /// reset_unix are skipped.
+    pub fn samples_for<'a>(
+        &'a self,
+        selector: impl Fn(&'a UsageSnapshot) -> Option<&'a RateWindow>,
+    ) -> Vec<(i64, f64, i64)> {
+        self.history
+            .iter()
+            .filter_map(|snap| {
+                let window = selector(snap)?;
+                Some((snap.fetched_at_unix, window.utilization?, window.reset_unix?))
+            })
+            .collect()
+    }
 }
 
 fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> Result<T, StoreError> {
@@ -100,12 +156,26 @@ pub fn save_usage_cache(dir: &Path, cache: &UsageCache) -> Result<(), StoreError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::usage::RateWindow;
 
     fn tmp_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("uc-cache-test-{label}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn sample_snapshot(fetched_at_unix: i64, utilization: f64, reset_unix: i64) -> UsageSnapshot {
+        UsageSnapshot {
+            five_hour: Some(RateWindow {
+                status: Some("allowed".into()),
+                reset_unix: Some(reset_unix),
+                utilization: Some(utilization),
+                estimated_full_unix: None,
+            }),
+            seven_day: None,
+            overage: None,
+            representative_claim: Some("five_hour".into()),
+            fetched_at_unix,
+        }
     }
 
     #[test]
@@ -123,6 +193,9 @@ mod tests {
         settings.theme = Theme::Dark;
         settings.poll_interval_secs = 600;
         settings.window_x = Some(120);
+        settings.show_estimated_time = true;
+        settings.bar_color = Some("#2a78d6".to_string());
+        settings.widget_scale = 1.25;
 
         save_settings(&dir, &settings).unwrap();
         let loaded = load_settings(&dir).unwrap();
@@ -133,22 +206,37 @@ mod tests {
     #[test]
     fn round_trips_usage_cache() {
         let dir = tmp_dir("usagecache");
-        let cache = UsageCache {
-            last_snapshot: Some(UsageSnapshot {
-                five_hour: Some(RateWindow {
-                    status: Some("allowed".into()),
-                    reset_unix: Some(123),
-                    utilization: Some(0.42),
-                }),
-                seven_day: None,
-                overage: None,
-                representative_claim: Some("five_hour".into()),
-                fetched_at_unix: 100,
-            }),
-        };
+        let mut cache = UsageCache::default();
+        cache.record(sample_snapshot(100, 0.42, 123));
+
         save_usage_cache(&dir, &cache).unwrap();
         let loaded = load_usage_cache(&dir).unwrap();
         assert_eq!(loaded, cache);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn record_prunes_history_beyond_the_cap() {
+        let mut cache = UsageCache::default();
+        for i in 0..(MAX_HISTORY + 10) {
+            cache.record(sample_snapshot(i as i64, 0.1, 1000));
+        }
+        assert_eq!(cache.history.len(), MAX_HISTORY);
+        // The oldest 10 entries should have been dropped, so the first
+        // remaining entry is fetched_at_unix=10.
+        assert_eq!(cache.history.first().unwrap().fetched_at_unix, 10);
+    }
+
+    #[test]
+    fn samples_for_extracts_matching_window_triples() {
+        let mut cache = UsageCache::default();
+        cache.record(sample_snapshot(0, 0.1, 1000));
+        cache.record(sample_snapshot(600, 0.3, 1000));
+
+        let samples = cache.samples_for(|s| s.five_hour.as_ref());
+        assert_eq!(samples, vec![(0, 0.1, 1000), (600, 0.3, 1000)]);
+
+        let empty = cache.samples_for(|s| s.seven_day.as_ref());
+        assert!(empty.is_empty());
     }
 }

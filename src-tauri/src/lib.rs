@@ -5,18 +5,22 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
-use usage_core::{auth, cache, usage};
+use usage_core::{auth, cache, estimate, usage};
 
 struct AppState {
     http_client: reqwest::Client,
 }
 
-/// Debug-Logging fuer diesen Build: alles Relevante geht in eine Datei
-/// (`<app-data-dir>/debug.log`), damit auch Fehler sichtbar sind, die vor
-/// dem Anzeigen jeder UI passieren, und damit sie sich nach dem Release-Build
-/// (kein Konsolenfenster, siehe main.rs) noch inspizieren lassen. Wird bei
-/// jedem Programmstart neu angelegt (frueherer Inhalt geht verloren), damit
-/// die Datei immer den letzten Lauf zeigt.
+/// Base widget window size at widget_scale=1.0, in logical pixels. Must match
+/// the "widget" window's width/height in tauri.conf.json.
+const BASE_WIDGET_WIDTH: f64 = 300.0;
+const BASE_WIDGET_HEIGHT: f64 = 210.0;
+
+/// Debug logging for this build: everything relevant goes into a file
+/// (`<app-data-dir>/debug.log`), so failures are visible even if they happen
+/// before any UI shows up, and so they can still be inspected after a
+/// release build (no console window, see main.rs). Rewritten fresh on every
+/// program start so the file always reflects the most recent run.
 fn log_path() -> Option<std::path::PathBuf> {
     cache::app_data_dir().ok().map(|d| d.join("debug.log"))
 }
@@ -44,17 +48,17 @@ fn reset_log_file() {
     }
 }
 
-/// Nimmt Log-Zeilen vom Frontend entgegen, damit JS-Fehler und UI-Events im
-/// selben debug.log landen wie die Rust-seitigen Ereignisse - ein Log statt
-/// zwei getrennter Quellen (Konsole ist im Release-Build ohnehin unsichtbar).
+/// Accepts log lines from the frontend, so JS errors and UI events land in
+/// the same debug.log as the Rust-side events, one log instead of two
+/// separate sources (the console is invisible in a release build anyway).
 #[tauri::command]
 fn log_frontend(message: String) {
     log_line(&format!("[frontend] {message}"));
 }
 
-/// Status, den das Frontend zur Anzeige braucht. Bewusst ein flaches,
-/// serialisierbares Modell statt der internen usage-core-Typen 1:1, damit
-/// Frontend-Aenderungen nicht an die Rust-interne Struktur gekoppelt sind.
+/// Status the frontend needs for display. Deliberately a flat, serializable
+/// model instead of the internal usage-core types directly, so frontend
+/// changes aren't coupled to the Rust-internal structure.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum UsageStatus {
@@ -66,6 +70,21 @@ enum UsageStatus {
 
 fn state_dir() -> Result<std::path::PathBuf, String> {
     cache::app_data_dir().map_err(|e| e.to_string())
+}
+
+/// Fills in each window's `estimated_full_unix` from history, using the pure
+/// extrapolation logic in `usage_core::estimate`. Kept separate from the raw
+/// header parsing in usage.rs since it's a derived value computed from
+/// stored history, not something the API itself reports.
+fn apply_estimates(snapshot: &mut usage::UsageSnapshot, cache: &cache::UsageCache) {
+    if let Some(w) = snapshot.five_hour.as_mut() {
+        let samples = cache.samples_for(|s| s.five_hour.as_ref());
+        w.estimated_full_unix = estimate::estimate_full_at(&samples);
+    }
+    if let Some(w) = snapshot.seven_day.as_mut() {
+        let samples = cache.samples_for(|s| s.seven_day.as_ref());
+        w.estimated_full_unix = estimate::estimate_full_at(&samples);
+    }
 }
 
 #[tauri::command]
@@ -110,16 +129,31 @@ async fn get_usage_status(state: State<'_, AppState>) -> Result<UsageStatus, Str
                 "get_usage_status: fetch_usage OK - five_hour={:?}, seven_day={:?}, overage={:?}, representative_claim={:?}",
                 snapshot.five_hour, snapshot.seven_day, snapshot.overage, snapshot.representative_claim
             ));
-            let cache_data = cache::UsageCache { last_snapshot: Some(snapshot.clone()) };
+
+            let mut cache_data = cache::load_usage_cache(&dir).unwrap_or_default();
+            cache_data.record(snapshot.clone());
             match cache::save_usage_cache(&dir, &cache_data) {
                 Ok(()) => log_line("get_usage_status: usage cache saved"),
                 Err(e) => log_line(&format!("get_usage_status: WARNING failed to save usage cache: {e}")),
             }
-            Ok(UsageStatus::Ok { snapshot, subscription_type: session.subscription_type })
+
+            let mut response_snapshot = snapshot;
+            apply_estimates(&mut response_snapshot, &cache_data);
+            log_line(&format!(
+                "get_usage_status: estimates - five_hour_full={:?}, seven_day_full={:?}",
+                response_snapshot.five_hour.as_ref().and_then(|w| w.estimated_full_unix),
+                response_snapshot.seven_day.as_ref().and_then(|w| w.estimated_full_unix),
+            ));
+
+            Ok(UsageStatus::Ok { snapshot: response_snapshot, subscription_type: session.subscription_type })
         }
         Err(e) => {
             log_line(&format!("get_usage_status: fetch_usage FAILED: {e}"));
-            let stale = cache::load_usage_cache(&dir).ok().and_then(|c| c.last_snapshot);
+            let cache_data = cache::load_usage_cache(&dir).unwrap_or_default();
+            let mut stale = cache_data.last_snapshot.clone();
+            if let Some(s) = stale.as_mut() {
+                apply_estimates(s, &cache_data);
+            }
             log_line(&format!(
                 "get_usage_status: falling back to stale cache, available={}",
                 stale.is_some()
@@ -145,6 +179,21 @@ fn get_settings() -> Result<cache::Settings, String> {
     }
 }
 
+/// Resizes the widget window to match `widget_scale`, keeping the same
+/// aspect ratio as the base size defined in tauri.conf.json. `resizable` is
+/// left `false` in the config so users can't drag-resize it by accident;
+/// this is the only intended way to change its size.
+fn apply_widget_scale(app: &tauri::AppHandle, scale: f32) {
+    if let Some(widget) = app.get_webview_window("widget") {
+        let scale = (scale as f64).clamp(0.5, 3.0);
+        let size = tauri::LogicalSize::new(BASE_WIDGET_WIDTH * scale, BASE_WIDGET_HEIGHT * scale);
+        match widget.set_size(size) {
+            Ok(()) => log_line(&format!("apply_widget_scale: resized widget window to {size:?} (scale={scale})")),
+            Err(e) => log_line(&format!("apply_widget_scale: FAILED to resize widget window: {e}")),
+        }
+    }
+}
+
 #[tauri::command]
 fn save_settings(app: tauri::AppHandle, settings: cache::Settings) -> Result<(), String> {
     log_line(&format!("save_settings: called with {settings:?}"));
@@ -160,6 +209,7 @@ fn save_settings(app: tauri::AppHandle, settings: cache::Settings) -> Result<(),
     } else {
         log_line("save_settings: WARNING widget window not found");
     }
+    apply_widget_scale(&app, settings.widget_scale);
 
     let autolaunch = app.autolaunch();
     let is_enabled = autolaunch.is_enabled().unwrap_or(false);
@@ -203,11 +253,11 @@ fn show_settings_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Baut den Login-Befehl. Auf Windows ist `claude` (npm-Global-Install) ein
-/// `claude.cmd`-Shim, das `CreateProcess` ohne Shell nicht auflöst - deshalb
-/// läuft es dort über `cmd /C`. CREATE_NO_WINDOW unterdrückt das sonst kurz
-/// aufblitzende Konsolenfenster; der Browser-OAuth-Flow selbst braucht keine
-/// sichtbare Konsole.
+/// Builds the login command. On Windows, `claude` (from a global npm install)
+/// is a `claude.cmd` shim that `CreateProcess` can't resolve without a
+/// shell, so it runs through `cmd /C` there. CREATE_NO_WINDOW suppresses the
+/// console window that would otherwise briefly flash; the browser OAuth flow
+/// itself doesn't need a visible console.
 #[cfg(target_os = "windows")]
 fn login_command() -> tokio::process::Command {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -226,18 +276,18 @@ fn login_command() -> tokio::process::Command {
     cmd
 }
 
-/// Startet den offiziellen Claude-Code-Login-Flow (echter Browser-OAuth ueber
-/// Anthropic). Dieses Programm implementiert kein eigenes OAuth - es ruft nur
-/// die vom Nutzer bereits installierte `claude` CLI auf und liest anschliessend
-/// die Session, die sie selbst anlegt.
+/// Starts the official Claude Code login flow (real browser OAuth through
+/// Anthropic). This app implements no OAuth of its own, it only calls the
+/// `claude` CLI the user already has installed and later reads the session
+/// it creates.
 ///
-/// Wartet bewusst NICHT auf das Prozessende: der Login-Flow haengt an einer
-/// Browser-Interaktion mit unbekannter Dauer, und der CLI-Prozess muss nach
-/// erfolgreichem Login nicht zwingend zeitnah sauber terminieren. Das Frontend
-/// pollt stattdessen selbst, bis die Session-Datei eine gueltige Session zeigt.
-/// stdout/stderr des Kindprozesses werden mitgeschnitten und geloggt, damit
-/// z.B. eine "'claude' is not recognized"-Meldung von cmd.exe sichtbar wird,
-/// obwohl kein Konsolenfenster angezeigt wird.
+/// Deliberately does NOT wait for the process to exit: the login flow hangs
+/// on a browser interaction of unknown duration, and the CLI process isn't
+/// guaranteed to terminate cleanly right after a successful login. The
+/// frontend polls instead, until the session file shows a valid session.
+/// The child's stdout/stderr are captured and logged, so e.g. a "'claude' is
+/// not recognized" message from cmd.exe is visible even though no console
+/// window is shown.
 #[tauri::command]
 async fn start_claude_login() -> Result<(), String> {
     log_line("start_claude_login: called");
@@ -250,7 +300,7 @@ async fn start_claude_login() -> Result<(), String> {
         Ok(c) => c,
         Err(e) => {
             let msg = format!(
-                "Konnte 'claude login' nicht starten (ist die Claude Code CLI installiert und im PATH?): {e}"
+                "Could not start 'claude login' (is the Claude Code CLI installed and on your PATH?): {e}"
             );
             log_line(&format!(
                 "start_claude_login: spawn FAILED: {msg} (io_error_kind={:?}, raw_os_error={:?})",
@@ -296,10 +346,10 @@ async fn start_claude_login() -> Result<(), String> {
         });
     }
 
-    // Bewusst kein child.wait().await hier - siehe Doc-Kommentar oben.
-    // Der Child-Prozess laeuft unabhaengig weiter; wenn er beendet, ohne dass
-    // stdout/stderr etwas Nennenswertes gesagt haben, ist das normal (z.B.
-    // der `claude`-Prozess uebergibt an den Browser und beendet sich selbst).
+    // Deliberately no child.wait().await here, see the doc comment above.
+    // The child process keeps running independently; if it exits without
+    // stdout/stderr having said anything notable, that's normal (e.g. the
+    // `claude` process hands off to the browser and exits on its own).
     tauri::async_runtime::spawn(async move {
         match child.wait().await {
             Ok(status) => log_line(&format!("start_claude_login: child process exited with {status}")),
@@ -374,6 +424,7 @@ pub fn run() {
             } else {
                 log_line("setup: WARNING widget window not found (check tauri.conf.json)");
             }
+            apply_widget_scale(&handle, settings.widget_scale);
 
             if let Some(settings_win) = app.get_webview_window("settings") {
                 log_line("setup: settings window found, wiring close-to-hide behavior");
@@ -393,9 +444,9 @@ pub fn run() {
                 log_line("setup: WARNING settings window not found (check tauri.conf.json)");
             }
 
-            let refresh_item = MenuItem::with_id(app, "refresh", "Jetzt aktualisieren", true, None::<&str>)?;
-            let settings_item = MenuItem::with_id(app, "settings", "Einstellungen", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
+            let refresh_item = MenuItem::with_id(app, "refresh", "Refresh now", true, None::<&str>)?;
+            let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&refresh_item, &settings_item, &quit_item])?;
 
             TrayIconBuilder::new()
@@ -424,8 +475,8 @@ pub fn run() {
                 .build(app)?;
             log_line("setup: tray icon built");
 
-            // Hintergrund-Polling: liest das konfigurierte Intervall bei jedem
-            // Tick neu, damit Settings-Aenderungen ohne Neustart wirken.
+            // Background polling: re-reads the configured interval on every
+            // tick, so settings changes take effect without a restart.
             tauri::async_runtime::spawn(async move {
                 loop {
                     let interval_secs = state_dir()

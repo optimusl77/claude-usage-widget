@@ -27,7 +27,9 @@ If something doesn't work, check `%APPDATA%\claude-usage-widget\debug.log`. It's
 
 ## Customizing
 
-Right-click the tray icon and open **Settings**: theme (system/light/dark), accent color, compact layout, opacity, always-on-top, autostart, refresh interval. Drag the widget anywhere; its position is remembered.
+Right-click the tray icon and open **Settings**: theme (system/light/dark), accent color, bar color (automatic severity coloring or a fixed color), estimated time to limit, opacity, widget size, always-on-top, autostart, refresh interval. Drag the widget anywhere; its position is remembered.
+
+**Estimated time to limit** extrapolates when a bar will hit 100%, based on how fast your usage has been rising since the app started tracking it. It needs a bit of history to become accurate and won't show anything right after installing, or once a window has just reset.
 
 ## Development
 

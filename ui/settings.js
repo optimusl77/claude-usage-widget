@@ -26,6 +26,33 @@ function renderSwatches(container, value) {
   }
 }
 
+function renderBarColorSwatches(container, value) {
+  container.innerHTML = "";
+
+  const autoSwatch = document.createElement("div");
+  autoSwatch.className = "swatch swatch-auto" + (value ? "" : " active");
+  autoSwatch.title = "Automatic (color reflects usage severity)";
+  autoSwatch.addEventListener("click", () => {
+    settings.barColor = null;
+    renderBarColorSwatches(container, null);
+    persist();
+  });
+  container.appendChild(autoSwatch);
+
+  for (const hex of ACCENT_CHOICES) {
+    const el = document.createElement("div");
+    el.className = "swatch" + (hex === value ? " active" : "");
+    el.style.background = hex;
+    el.title = hex;
+    el.addEventListener("click", () => {
+      settings.barColor = hex;
+      renderBarColorSwatches(container, hex);
+      persist();
+    });
+    container.appendChild(el);
+  }
+}
+
 async function persist() {
   dbg(`settings persist: ${JSON.stringify(settings)}`);
   try {
@@ -64,15 +91,17 @@ async function init() {
   renderSegmented(document.getElementById("theme-segmented"), settings.theme);
   renderSegmented(document.getElementById("interval-segmented"), settings.pollIntervalSecs);
   renderSwatches(document.getElementById("accent-swatches"), settings.accentColor);
+  renderBarColorSwatches(document.getElementById("bar-color-swatches"), settings.barColor);
 
-  document.getElementById("compact-toggle").checked = settings.compactLayout;
+  document.getElementById("estimated-time-toggle").checked = settings.showEstimatedTime;
   document.getElementById("always-on-top-toggle").checked = settings.alwaysOnTop;
   document.getElementById("autostart-toggle").checked = settings.autostart;
   document.getElementById("opacity-slider").value = settings.opacity;
+  document.getElementById("widget-scale-slider").value = settings.widgetScale;
 
   bindSegmented("theme-segmented", "theme", (v) => v);
   bindSegmented("interval-segmented", "pollIntervalSecs", (v) => Number(v));
-  bindToggle("compact-toggle", "compactLayout");
+  bindToggle("estimated-time-toggle", "showEstimatedTime");
   bindToggle("always-on-top-toggle", "alwaysOnTop");
   bindToggle("autostart-toggle", "autostart");
 
@@ -80,6 +109,11 @@ async function init() {
     settings.opacity = Number(e.target.value);
   });
   document.getElementById("opacity-slider").addEventListener("change", persist);
+
+  document.getElementById("widget-scale-slider").addEventListener("input", (e) => {
+    settings.widgetScale = Number(e.target.value);
+  });
+  document.getElementById("widget-scale-slider").addEventListener("change", persist);
 }
 
 init();

@@ -1,10 +1,10 @@
 use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
 
-/// Modell, das fuer den Usage-Poll benutzt wird. Bewusst das billigste Modell
-/// mit max_tokens=1, weil jeder Poll selbst ein kleines bisschen vom Kontingent
-/// des Nutzers verbraucht (siehe Discovery-Spike: count_tokens liefert KEINE
-/// Rate-Limit-Header, nur ein echter /v1/messages-Call tut das).
+/// Model used for the usage poll. Deliberately the cheapest model with
+/// max_tokens=1, because every poll itself consumes a small sliver of the
+/// user's quota (see the discovery spike: count_tokens returns NONE of the
+/// rate-limit headers, only a real /v1/messages call does).
 const POLL_MODEL: &str = "claude-haiku-4-5-20251001";
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -12,9 +12,9 @@ const OAUTH_BETA: &str = "oauth-2025-04-20";
 
 #[derive(Debug, thiserror::Error)]
 pub enum UsageError {
-    #[error("Netzwerk-/API-Fehler: {0}")]
+    #[error("network/API error: {0}")]
     Http(#[from] reqwest::Error),
-    #[error("Antwort enthielt keine bekannten Rate-Limit-Header (HTTP {0}) - API-Vertrag hat sich evtl. geaendert")]
+    #[error("response did not contain the expected rate-limit headers (HTTP {0}); the API contract may have changed")]
     NoRateLimitHeaders(u16),
 }
 
@@ -24,6 +24,11 @@ pub struct RateWindow {
     pub status: Option<String>,
     pub reset_unix: Option<i64>,
     pub utilization: Option<f64>,
+    /// Extrapolated unix timestamp at which this window would hit 100%
+    /// utilization if it kept growing at its recent pace, computed from
+    /// history rather than parsed from headers. See `crate::estimate`.
+    #[serde(default)]
+    pub estimated_full_unix: Option<i64>,
 }
 
 impl RateWindow {
@@ -54,13 +59,12 @@ fn window_from_headers(headers: &HeaderMap, prefix: &str) -> RateWindow {
     let utilization =
         header_str(headers, &format!("anthropic-ratelimit-unified-{prefix}-utilization"))
             .and_then(|v| v.parse::<f64>().ok());
-    RateWindow { status, reset_unix, utilization }
+    RateWindow { status, reset_unix, utilization, estimated_full_unix: None }
 }
 
-/// Extrahiert Nutzungsdaten aus den Response-Headern eines authentifizierten
-/// /v1/messages-Requests. Alle Annahmen ueber die (inoffizielle) Header-Form
-/// sind bewusst hier gebuendelt, damit ein Fix bei API-Aenderungen an einer
-/// einzigen Stelle passiert.
+/// Extracts usage data from the response headers of an authenticated
+/// /v1/messages request. All assumptions about the (unofficial) header shape
+/// are deliberately bundled here so a fix for an API change happens in one place.
 pub fn parse_headers(headers: &HeaderMap, fetched_at_unix: i64) -> UsageSnapshot {
     let five_hour = window_from_headers(headers, "5h");
     let seven_day = window_from_headers(headers, "7d");
@@ -85,10 +89,9 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-/// Fuehrt den minimalen authentifizierten Poll aus und liefert die geparsten
-/// Nutzungsdaten. Verbraucht selbst ein winziges bisschen Kontingent - siehe
-/// POLL_MODEL-Kommentar. Deshalb sollte der Aufrufer nicht haeufiger als
-/// alle paar Minuten pollen.
+/// Performs the minimal authenticated poll and returns the parsed usage data.
+/// Consumes a tiny sliver of quota itself, see the POLL_MODEL comment, so
+/// callers shouldn't poll more often than every few minutes.
 pub async fn fetch_usage(client: &reqwest::Client, access_token: &str) -> Result<UsageSnapshot, UsageError> {
     let resp = client
         .post(API_URL)
@@ -127,7 +130,7 @@ mod tests {
         map
     }
 
-    /// Reale Header-Werte aus dem Discovery-Spike gegen eine echte Pro-Session.
+    /// Real header values from the discovery spike against a real Pro session.
     #[test]
     fn parses_real_world_header_sample() {
         let headers = headers_from_pairs(&[
@@ -171,8 +174,8 @@ mod tests {
 
     #[test]
     fn partial_headers_still_parse_available_fields() {
-        // Falls Anthropic mal nur einzelne Felder aendert/weglaesst, soll das
-        // nicht die ganze Auswertung zum Absturz bringen.
+        // If Anthropic ever changes or omits individual fields, that
+        // shouldn't crash the whole parse.
         let headers = headers_from_pairs(&[
             ("anthropic-ratelimit-unified-5h-utilization", "0.5"),
         ]);

@@ -1,6 +1,7 @@
-// Sendet Log-Zeilen an den Rust-Backend-Logger (debug.log im App-Datenverzeichnis),
-// damit Frontend- und Backend-Ereignisse in derselben Datei landen. Fängt außerdem
-// unbehandelte Fehler/Promise-Rejections ab, die sonst spurlos verschwinden würden.
+// Sends log lines to the Rust backend logger (debug.log in the app data
+// directory), so frontend and backend events land in the same file. Also
+// catches unhandled errors/promise rejections that would otherwise vanish
+// without a trace.
 function dbg(msg) {
   try {
     console.log(msg);
@@ -10,7 +11,7 @@ function dbg(msg) {
   try {
     window.__TAURI__.core.invoke("log_frontend", { message: String(msg) });
   } catch {
-    /* ignore - Tauri API evtl. noch nicht bereit */
+    /* ignore - Tauri API may not be ready yet */
   }
 }
 

@@ -4,13 +4,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
-    #[error("Claude Code ist nicht eingeloggt (Credentials-Datei fehlt: {0})")]
+    #[error("Claude Code is not logged in (credentials file missing: {0})")]
     NotLoggedIn(PathBuf),
-    #[error("Credentials-Datei konnte nicht gelesen werden: {0}")]
+    #[error("could not read credentials file: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Credentials-Datei hat ein unerwartetes Format: {0}")]
+    #[error("credentials file has an unexpected format: {0}")]
     Parse(#[from] serde_json::Error),
-    #[error("Kein Home-Verzeichnis gefunden")]
+    #[error("could not find the home directory")]
     NoHomeDir,
 }
 
@@ -32,10 +32,10 @@ struct OauthSection {
     rate_limit_tier: Option<String>,
 }
 
-/// Aktive Claude-Login-Session, gelesen aus der lokalen Credentials-Datei,
-/// die die offizielle Claude Code CLI beim Login/laufenden Betrieb pflegt.
-/// Dieses Modul schreibt diese Datei nie und macht keinen eigenen OAuth-Handshake -
-/// es liest ausschliesslich, was Claude Code selbst dort bereits abgelegt hat.
+/// Active Claude login session, read from the local credentials file that
+/// the official Claude Code CLI maintains during login and normal use. This
+/// module never writes that file and never does its own OAuth handshake, it
+/// only reads what Claude Code has already put there.
 #[derive(Debug, Clone)]
 pub struct Session {
     pub access_token: String,
@@ -54,8 +54,8 @@ impl Session {
     }
 }
 
-/// Pfad zur Claude Code Credentials-Datei. Identisch auf Windows/macOS/Linux,
-/// da Claude Code ueberall im Home-Verzeichnis unter .claude/ ablegt.
+/// Path to the Claude Code credentials file. Identical on Windows/macOS/Linux,
+/// since Claude Code stores it under .claude/ in the home directory everywhere.
 pub fn credentials_path() -> Result<PathBuf, AuthError> {
     let home = dirs::home_dir().ok_or(AuthError::NoHomeDir)?;
     Ok(home.join(".claude").join(".credentials.json"))
