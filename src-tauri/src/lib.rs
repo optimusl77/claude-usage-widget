@@ -90,14 +90,34 @@ fn show_settings_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Baut den Login-Befehl. Auf Windows ist `claude` (npm-Global-Install) ein
+/// `claude.cmd`-Shim, das `CreateProcess` ohne Shell nicht auflöst - deshalb
+/// läuft es dort über `cmd /C`. CREATE_NO_WINDOW unterdrückt das sonst kurz
+/// aufblitzende Konsolenfenster; der Browser-OAuth-Flow selbst braucht keine
+/// sichtbare Konsole.
+#[cfg(target_os = "windows")]
+fn login_command() -> tokio::process::Command {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut cmd = tokio::process::Command::new("cmd");
+    cmd.args(["/C", "claude", "login"]);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+#[cfg(not(target_os = "windows"))]
+fn login_command() -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new("claude");
+    cmd.arg("login");
+    cmd
+}
+
 /// Startet den offiziellen Claude-Code-Login-Flow (echter Browser-OAuth ueber
 /// Anthropic). Dieses Programm implementiert kein eigenes OAuth - es ruft nur
 /// die vom Nutzer bereits installierte `claude` CLI auf und liest anschliessend
 /// die Session, die sie selbst anlegt.
 #[tauri::command]
 async fn start_claude_login() -> Result<(), String> {
-    let mut child = tokio::process::Command::new("claude")
-        .arg("login")
+    let mut child = login_command()
         .spawn()
         .map_err(|e| format!("Konnte 'claude login' nicht starten (ist die Claude Code CLI installiert und im PATH?): {e}"))?;
 
