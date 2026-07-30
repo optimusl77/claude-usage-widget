@@ -504,8 +504,9 @@ dependencies = [
 
 [[package]]
 name = "claude-usage-widget"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
+ "chrono",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -4459,7 +4460,7 @@ dependencies = [
 
 [[package]]
 name = "usage-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "dirs 5.0.1",

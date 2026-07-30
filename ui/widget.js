@@ -39,6 +39,47 @@ function renderLoading() {
     </div>`;
 }
 
+function renderWaitingForLogin() {
+  content.innerHTML = `
+    <div class="state-view">
+      <div class="spinner"></div>
+      <div class="state-title">Warte auf Login im Browser</div>
+      <div class="state-desc">Schließe den Login im geöffneten Browserfenster ab. Das kann einen Moment dauern.</div>
+      <button class="primary-btn" id="check-again-btn">Ich bin fertig</button>
+    </div>`;
+  document.getElementById("check-again-btn").addEventListener("click", pollUntilLoggedIn);
+}
+
+/// Pollt get_usage_status im Hintergrund, bis die Session nicht mehr
+/// "notLoggedIn" ist. Der Rust-Befehl start_claude_login wartet bewusst nicht
+/// auf das Prozessende (siehe lib.rs) - dieses Polling ist der eigentliche
+/// Fortschrittsindikator fuer den Login.
+let loginPollToken = 0;
+async function pollUntilLoggedIn() {
+  const myToken = ++loginPollToken;
+  dbg(`pollUntilLoggedIn: starting (token ${myToken})`);
+  for (let i = 0; i < 60; i++) {
+    if (myToken !== loginPollToken) {
+      dbg(`pollUntilLoggedIn: token ${myToken} superseded, stopping`);
+      return;
+    }
+    try {
+      const status = await invoke("get_usage_status");
+      dbg(`pollUntilLoggedIn: attempt ${i + 1}/60, status.kind=${status.kind}`);
+      if (status.kind !== "notLoggedIn") {
+        dbg("pollUntilLoggedIn: login detected, applying status");
+        applyStatus(status);
+        return;
+      }
+    } catch (err) {
+      dbg(`pollUntilLoggedIn: attempt ${i + 1}/60 threw: ${err}`);
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  dbg("pollUntilLoggedIn: gave up after 60 attempts (~3 minutes)");
+  renderNotLoggedIn();
+}
+
 function renderNotLoggedIn() {
   content.innerHTML = `
     <div class="state-view">
@@ -47,12 +88,15 @@ function renderNotLoggedIn() {
       <button class="primary-btn" id="login-btn">Mit Claude anmelden</button>
     </div>`;
   document.getElementById("login-btn").addEventListener("click", async (e) => {
+    dbg("login button clicked (state: notLoggedIn)");
     e.target.disabled = true;
-    e.target.textContent = "Browser öffnet sich…";
     try {
       await invoke("start_claude_login");
-      await refresh();
+      dbg("start_claude_login invoke resolved without error");
+      renderWaitingForLogin();
+      pollUntilLoggedIn();
     } catch (err) {
+      dbg(`start_claude_login invoke FAILED: ${err}`);
       renderError(String(err), null);
     }
   });
@@ -66,11 +110,15 @@ function renderSessionExpired() {
       <button class="primary-btn" id="login-btn">Erneut anmelden</button>
     </div>`;
   document.getElementById("login-btn").addEventListener("click", async (e) => {
+    dbg("login button clicked (state: sessionExpired)");
     e.target.disabled = true;
     try {
       await invoke("start_claude_login");
-      await refresh();
+      dbg("start_claude_login invoke resolved without error");
+      renderWaitingForLogin();
+      pollUntilLoggedIn();
     } catch (err) {
+      dbg(`start_claude_login invoke FAILED: ${err}`);
       renderError(String(err), null);
     }
   });
@@ -140,41 +188,52 @@ function renderSnapshot(snapshot, subscriptionType, stale) {
   countdownTimer = setInterval(tick, 1000);
 }
 
+function applyStatus(status) {
+  switch (status.kind) {
+    case "notLoggedIn":
+      renderNotLoggedIn();
+      break;
+    case "sessionExpired":
+      renderSessionExpired();
+      break;
+    case "ok":
+      renderSnapshot(status.snapshot, status.subscriptionType, false);
+      break;
+    case "error":
+      renderError(status.message, status.staleSnapshot);
+      break;
+    default:
+      renderLoading();
+  }
+}
+
 async function refresh() {
+  loginPollToken++; // ein manueller/periodischer Refresh bricht ein laufendes Login-Polling ab
+  dbg("refresh: calling get_usage_status");
   try {
     const status = await invoke("get_usage_status");
-    switch (status.kind) {
-      case "notLoggedIn":
-        renderNotLoggedIn();
-        break;
-      case "sessionExpired":
-        renderSessionExpired();
-        break;
-      case "ok":
-        renderSnapshot(status.snapshot, status.subscriptionType, false);
-        break;
-      case "error":
-        renderError(status.message, status.staleSnapshot);
-        break;
-      default:
-        renderLoading();
-    }
+    dbg(`refresh: got status.kind=${status.kind}`);
+    applyStatus(status);
   } catch (err) {
+    dbg(`refresh: get_usage_status FAILED: ${err}`);
     renderError(String(err), null);
   }
 }
 
 async function init() {
+  dbg("widget init: starting");
   renderLoading();
   try {
     currentSettings = await invoke("get_settings");
+    dbg(`widget init: settings loaded: ${JSON.stringify(currentSettings)}`);
     applyWidgetTheme(currentSettings);
-  } catch {
-    /* fällt auf CSS-Defaults zurück, wenn Settings noch nicht existieren */
+  } catch (err) {
+    dbg(`widget init: get_settings failed, falling back to CSS defaults: ${err}`);
   }
 
   document.getElementById("refresh-btn").addEventListener("click", refresh);
   document.getElementById("settings-btn").addEventListener("click", () => {
+    dbg("settings button clicked");
     invoke("show_settings_window");
   });
 

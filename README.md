@@ -21,6 +21,10 @@ Login works through the official **Claude Code CLI**, not a custom OAuth flow:
 
 Requires the [Claude Code CLI](https://docs.claude.com/claude-code) to be installed and on your `PATH`.
 
+## Troubleshooting
+
+If something doesn't work, check `%APPDATA%\claude-usage-widget\debug.log`. It's rewritten fresh on every app start and records every backend and frontend step (session/login lookups, the live usage request, window events) with timestamps. Include its contents when reporting an issue.
+
 ## Customizing
 
 Right-click the tray icon and open **Settings**: theme (system/light/dark), accent color, compact layout, opacity, always-on-top, autostart, refresh interval. Drag the widget anywhere; its position is remembered.

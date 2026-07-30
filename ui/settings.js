@@ -27,7 +27,12 @@ function renderSwatches(container, value) {
 }
 
 async function persist() {
-  await invoke("save_settings", { settings });
+  dbg(`settings persist: ${JSON.stringify(settings)}`);
+  try {
+    await invoke("save_settings", { settings });
+  } catch (err) {
+    dbg(`settings persist FAILED: ${err}`);
+  }
   applyTheme(settings);
 }
 
@@ -51,7 +56,9 @@ function bindToggle(id, key) {
 }
 
 async function init() {
+  dbg("settings window init: starting");
   settings = await invoke("get_settings");
+  dbg(`settings window init: loaded ${JSON.stringify(settings)}`);
   applyTheme(settings);
 
   renderSegmented(document.getElementById("theme-segmented"), settings.theme);
