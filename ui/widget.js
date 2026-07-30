@@ -10,26 +10,35 @@ let lastStatus = null;
 
 function applyWidgetTheme(settings) {
   applyTheme(settings);
-  document.documentElement.style.zoom = settings.widgetScale || 1;
+  // Scales the whole widget (spacing, text, bars) by changing the root
+  // font-size that all widget CSS is defined relative to (rem units), then
+  // the actual OS window is resized to match on the Rust side. This is more
+  // robust across rendering engines than a CSS zoom/transform hack, which
+  // can disagree with the native window size and produce a scrollbar.
+  const scale = settings.widgetScale || 1;
+  document.documentElement.style.fontSize = `${10 * scale}px`;
   document.body.style.opacity = String(settings.opacity ?? 1);
 }
 
-function statusForUtilization(u) {
+function statusForUtilization(u, thresholds) {
   if (u === null || u === undefined) return "good";
-  if (u >= 0.95) return "critical";
-  if (u >= 0.8) return "serious";
-  if (u >= 0.6) return "warning";
+  const t = thresholds || { warning: 0.6, serious: 0.8, critical: 0.95 };
+  if (u >= t.critical) return "critical";
+  if (u >= t.serious) return "serious";
+  if (u >= t.warning) return "warning";
   return "good";
 }
 
 function formatDuration(seconds) {
   if (seconds <= 0) return "now";
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
+  // Minute granularity only, never seconds: this feeds a live countdown, and
+  // updating a "…m Ns" label every second was distracting flicker for no
+  // real benefit at these timescales (5h/7d windows).
+  const totalMinutes = Math.ceil(seconds / 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
   if (h > 0) return `${h}h ${m}m`;
-  const s = seconds % 60;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
+  return `${m}m`;
 }
 
 function formatRelative(targetUnix) {
@@ -149,19 +158,25 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-function meterRow(label, window_, barColorOverride, showEstimate) {
+function meterRow(label, window_, opts) {
+  const { barColorOverride, showEstimate, thresholds, showResetInfo } = opts;
   const util = window_?.utilization ?? 0;
   const pct = Math.round(util * 1000) / 10;
-  const status = statusForUtilization(util);
+  const status = statusForUtilization(util, thresholds);
   const colorStyle = barColorOverride ? ` background-color:${barColorOverride};` : "";
 
-  const resetLine = window_?.resetUnix
-    ? `<div class="meter-sub" data-target-unix="${window_.resetUnix}" data-prefix="Resets in "></div>`
-    : "";
-  const estimateLine =
-    showEstimate && window_?.estimatedFullUnix
-      ? `<div class="meter-estimate" data-target-unix="${window_.estimatedFullUnix}" data-prefix="~Full in "></div>`
-      : "";
+  let resetLine = "";
+  let estimateLine = "";
+  if (showResetInfo) {
+    if (window_?.resetUnix) {
+      resetLine = `<div class="meter-sub" data-target-unix="${window_.resetUnix}" data-prefix="Resets in "></div>`;
+    }
+    if (showEstimate) {
+      estimateLine = window_?.estimatedFullUnix
+        ? `<div class="meter-estimate" data-target-unix="${window_.estimatedFullUnix}" data-prefix="~Full in "></div>`
+        : `<div class="meter-estimate meter-estimate-pending">Gathering usage data…</div>`;
+    }
+  }
 
   return `
     <div class="meter-row">
@@ -180,13 +195,15 @@ function meterRow(label, window_, barColorOverride, showEstimate) {
 function renderSnapshot(snapshot, stale) {
   if (countdownTimer) clearInterval(countdownTimer);
 
-  const barColor = currentSettings?.barColor || null;
+  const barColorOverride = currentSettings?.barColor || null;
   const showEstimate = !!currentSettings?.showEstimatedTime;
+  const thresholds = currentSettings?.severityThresholds;
+  const showWeekReset = currentSettings?.showWeekReset ?? true;
 
   content.innerHTML = `
     <div class="meters">
-      ${meterRow("Session (5h)", snapshot.fiveHour, barColor, showEstimate)}
-      ${meterRow("Week (7 days)", snapshot.sevenDay, barColor, showEstimate)}
+      ${meterRow("Session (5h)", snapshot.fiveHour, { barColorOverride, showEstimate, thresholds, showResetInfo: true })}
+      ${meterRow("Week (7 days)", snapshot.sevenDay, { barColorOverride, showEstimate, thresholds, showResetInfo: showWeekReset })}
     </div>
     ${stale ? '<div class="stale-note">Showing last known values, update failed</div>' : ""}
   `;
@@ -199,7 +216,7 @@ function renderSnapshot(snapshot, stale) {
     });
   }
   tick();
-  countdownTimer = setInterval(tick, 1000);
+  countdownTimer = setInterval(tick, 15000);
 }
 
 function applyStatus(status) {

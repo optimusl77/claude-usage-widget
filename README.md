@@ -27,9 +27,13 @@ If something doesn't work, check `%APPDATA%\claude-usage-widget\debug.log`. It's
 
 ## Customizing
 
-Right-click the tray icon and open **Settings**: theme (system/light/dark), accent color, bar color (automatic severity coloring or a fixed color), estimated time to limit, opacity, widget size, always-on-top, autostart, refresh interval. Drag the widget anywhere; its position is remembered.
+Right-click the tray icon and open **Settings**: theme (system/light/dark), accent color, bar color, estimated time to limit, week reset visibility, opacity, widget size, always-on-top, autostart, refresh interval. Drag the widget anywhere; its position is remembered.
 
-**Estimated time to limit** extrapolates when a bar will hit 100%, based on how fast your usage has been rising since the app started tracking it. It needs a bit of history to become accurate and won't show anything right after installing, or once a window has just reset.
+**Bar color** is "Automatic" by default (colors each bar by how full it is) or a fixed color. Right-click "Automatic", or use the "Edit color thresholds" link, to change the utilization percentages at which the color switches (warning/serious/critical).
+
+**Estimated time to limit** extrapolates when a bar will hit 100%, based on how fast your usage has been rising since the app started tracking it. While it's on, a bar shows "Gathering usage data…" until there's enough history; it won't show anything right after installing, or right after a window resets.
+
+**Show week reset time** controls whether the weekly bar's countdown/estimate line is shown too. The session bar's countdown always shows.
 
 ## Development
 

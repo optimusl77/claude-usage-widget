@@ -26,7 +26,29 @@
       <div class="field-group">
         <div class="field-label">Bar color</div>
         <div class="color-swatches" id="bar-color-swatches"></div>
-        <div class="field-hint">"Automatic" colors each bar by how full it is; a fixed color uses the same shade for every bar.</div>
+        <button type="button" class="link-btn" id="edit-thresholds-btn">Edit color thresholds</button>
+        <div class="thresholds-panel" id="thresholds-panel" hidden>
+          <div class="threshold-row">
+            <span class="threshold-swatch" style="background: var(--status-warning)"></span>
+            <span>Warning at</span>
+            <input type="number" id="threshold-warning" min="0" max="100" step="1" />
+            <span>%</span>
+          </div>
+          <div class="threshold-row">
+            <span class="threshold-swatch" style="background: var(--status-serious)"></span>
+            <span>Serious at</span>
+            <input type="number" id="threshold-serious" min="0" max="100" step="1" />
+            <span>%</span>
+          </div>
+          <div class="threshold-row">
+            <span class="threshold-swatch" style="background: var(--status-critical)"></span>
+            <span>Critical at</span>
+            <input type="number" id="threshold-critical" min="0" max="100" step="1" />
+            <span>%</span>
+          </div>
+          <button type="button" class="link-btn" id="reset-thresholds-btn">Reset to defaults</button>
+        </div>
+        <div class="field-hint">"Automatic" colors each bar by how full it is; a fixed color uses the same shade for every bar. Right-click "Automatic" or use the link above to change the thresholds.</div>
       </div>
 
       <div class="field-group">
@@ -38,6 +60,17 @@
           </label>
         </div>
         <div class="field-hint">Estimates when a bar will hit 100%, based on how fast your usage has been rising. Needs a bit of history to become accurate.</div>
+      </div>
+
+      <div class="field-group">
+        <div class="toggle-row">
+          <span class="field-label">Show week reset time</span>
+          <label class="switch">
+            <input type="checkbox" id="week-reset-toggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="field-hint">The session countdown always shows; turn this off to hide the weekly one and reduce clutter.</div>
       </div>
 
       <div class="field-group">

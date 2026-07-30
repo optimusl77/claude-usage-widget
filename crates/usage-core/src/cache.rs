@@ -23,6 +23,27 @@ fn default_widget_scale() -> f32 {
     1.0
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// Utilization thresholds (0.0-1.0) at which a bar's automatic severity
+/// color switches to the next step. Only used when `Settings::bar_color` is
+/// `None` (automatic coloring).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SeverityThresholds {
+    pub warning: f32,
+    pub serious: f32,
+    pub critical: f32,
+}
+
+impl Default for SeverityThresholds {
+    fn default() -> Self {
+        Self { warning: 0.6, serious: 0.8, critical: 0.95 }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -48,6 +69,12 @@ pub struct Settings {
     /// base size. 1.0 is the default size.
     #[serde(default = "default_widget_scale")]
     pub widget_scale: f32,
+    #[serde(default)]
+    pub severity_thresholds: SeverityThresholds,
+    /// Whether to show the reset/estimate countdown lines under the weekly
+    /// bar too. The session (5h) bar's countdown always shows.
+    #[serde(default = "default_true")]
+    pub show_week_reset: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -74,6 +101,8 @@ impl Default for Settings {
             autostart: false,
             bar_color: None,
             widget_scale: 1.0,
+            severity_thresholds: SeverityThresholds::default(),
+            show_week_reset: true,
         }
     }
 }
@@ -196,10 +225,40 @@ mod tests {
         settings.show_estimated_time = true;
         settings.bar_color = Some("#2a78d6".to_string());
         settings.widget_scale = 1.25;
+        settings.severity_thresholds = SeverityThresholds { warning: 0.5, serious: 0.75, critical: 0.9 };
+        settings.show_week_reset = false;
 
         save_settings(&dir, &settings).unwrap();
         let loaded = load_settings(&dir).unwrap();
         assert_eq!(loaded, settings);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn loads_settings_file_from_before_thresholds_and_week_reset_existed() {
+        // Shape of a real settings.json written by v0.1.3, before
+        // severityThresholds/showWeekReset were added.
+        let dir = tmp_dir("old-format");
+        let old_json = r##"{
+            "theme": "dark",
+            "accentColor": "#d97757",
+            "showEstimatedTime": true,
+            "alwaysOnTop": true,
+            "opacity": 0.9,
+            "pollIntervalSecs": 300,
+            "windowX": 10,
+            "windowY": 20,
+            "autostart": false,
+            "barColor": null,
+            "widgetScale": 1.0
+        }"##;
+        std::fs::write(dir.join("settings.json"), old_json).unwrap();
+
+        let loaded = load_settings(&dir).unwrap();
+        assert_eq!(loaded.theme, Theme::Dark);
+        assert_eq!(loaded.show_estimated_time, true);
+        assert_eq!(loaded.severity_thresholds, SeverityThresholds::default());
+        assert_eq!(loaded.show_week_reset, true);
         std::fs::remove_dir_all(&dir).ok();
     }
 
