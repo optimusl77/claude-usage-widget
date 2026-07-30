@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Claude Usage – Einstellungen</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="settings-body">
+      <div class="settings-title">Einstellungen</div>
+
+      <div class="field-group">
+        <div class="field-label">Design</div>
+        <div class="segmented" id="theme-segmented">
+          <button data-value="system">System</button>
+          <button data-value="light">Hell</button>
+          <button data-value="dark">Dunkel</button>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="field-label">Akzentfarbe</div>
+        <div class="color-swatches" id="accent-swatches"></div>
+      </div>
+
+      <div class="field-group">
+        <div class="toggle-row">
+          <span class="field-label">Kompakte Ansicht</span>
+          <label class="switch">
+            <input type="checkbox" id="compact-toggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="toggle-row">
+          <span class="field-label">Immer im Vordergrund</span>
+          <label class="switch">
+            <input type="checkbox" id="always-on-top-toggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="toggle-row">
+          <span class="field-label">Beim Windows-Start starten</span>
+          <label class="switch">
+            <input type="checkbox" id="autostart-toggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="field-label">Transparenz</div>
+        <input type="range" id="opacity-slider" min="0.5" max="1" step="0.02" />
+      </div>
+
+      <div class="field-group">
+        <div class="field-label">Aktualisierungsintervall</div>
+        <div class="segmented" id="interval-segmented">
+          <button data-value="180">3 Min</button>
+          <button data-value="300">5 Min</button>
+          <button data-value="600">10 Min</button>
+          <button data-value="1800">30 Min</button>
+        </div>
+        <div class="field-hint">Jede Aktualisierung kostet minimal von deinem Claude-Kontingent (ein sehr kurzer Testaufruf) – kürzere Intervalle verbrauchen mehr davon.</div>
+      </div>
+
+      <div class="settings-footer">
+        Nutzt eine inoffizielle, nicht von Anthropic unterstützte Methode, um die Abo-Auslastung auszulesen (Login läuft über die offizielle Claude Code CLI). Kann bei API-Änderungen zeitweise nicht funktionieren.
+      </div>
+    </div>
+
+    <script src="theme.js"></script>
+    <script src="settings.js"></script>
+  </body>
+</html>
